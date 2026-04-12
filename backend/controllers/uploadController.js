@@ -1,6 +1,6 @@
 import axios from "axios";
 import getSupabaseClient from "../config/supabaseClient.js";
-import Document from "../models/document.js";
+import Document from "../models/Document.js";
 
 export const uploadFile = async (req, res) => {
   try {
