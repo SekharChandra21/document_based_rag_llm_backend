@@ -1,6 +1,6 @@
 import axios from "axios";
 import getSupabaseClient from "../config/supabaseClient.js";
-import Document from "../models/document.js";
+import Document from "../models/Document.js";
 
 export const uploadFile = async (req, res) => {
   try {
@@ -41,7 +41,7 @@ export const uploadFile = async (req, res) => {
     console.log(`📄 Document metadata saved:`, doc._id);
 
     // Trigger ingestion (don't await - let it run async)
-    axios.post("https://pushpaallu.app.n8n.cloud/webhook/ingest-doc", {
+    axios.post(`https://${process.env.N8N_DOMAIN_URL}/webhook/ingest-doc`, {
       filePath: fileUrl,
       trial_id,
       document_type,
