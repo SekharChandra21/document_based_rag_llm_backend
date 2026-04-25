@@ -29,3 +29,19 @@ export const authorizeRoles = (...roles) => {
     next();
   };
 };
+
+export const verifyN8N = (req, res, next) => {
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No token" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (token !== process.env.N8N_SECRET_TOKEN) {
+    return res.status(403).json({ error: "Invalid token" });
+  }
+
+  next();
+};
