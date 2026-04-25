@@ -2,7 +2,6 @@ import axios from "axios";
 import path from "path";
 import getSupabaseClient from "../config/supabaseClient.js";
 import Document from "../models/Document.js";
-import { ingestDocumentFromSource } from "./ingestionController.js";
 
 export const uploadFile = async (req, res) => {
   try {
