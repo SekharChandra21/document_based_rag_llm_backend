@@ -14,6 +14,12 @@ const app = express();
 // ============ CRITICAL: Trust proxy FIRST ============
 app.set('trust proxy', 1);
 
+// ============ REQUEST LOGGING (DEBUG) ============
+app.use((req, res, next) => {
+  console.log("➡️ Incoming:", req.method, req.url, "from:", req.ip || req.connection.remoteAddress);
+  next();
+});
+
 // ============ CRITICAL: CORS MUST be applied FIRST before any routes ============
 const corsOptions = {
   origin: function (origin, callback) {
@@ -106,94 +112,66 @@ app.use((err, req, res, next) => {
 });
 
 // ============ SERVER STARTUP ============
-const startServer = async () => {
-  try {
-    console.log('\n' + '='.repeat(60));
-    console.log('🚀 Clinical Trails Intelligence System - Backend Starting');
-    console.log('='.repeat(60) + '\n');
+const startServer = () => {
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 Clinical Trails Intelligence System - Backend Starting');
+  console.log('='.repeat(60) + '\n');
 
-    // Check environment variables
-    console.log('🔍 [STEP 1] Checking environment variables...');
-    const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET'];
-    const missingVars = requiredEnvVars.filter(v => !process.env[v]);
-    
-    if (missingVars.length > 0) {
-      console.error(`❌ CRITICAL: Missing required environment variables: ${missingVars.join(', ')}`);
-      console.error('⚠️  Setting dummy values for now - Login will fail without real values');
-      // Don't exit - allow server to start for health checks
-    } else {
-      console.log('✅ All required environment variables present');
-    }
-
-    // Attempt MongoDB connection (non-blocking with timeout)
-    console.log('\n📡 [STEP 2] Attempting MongoDB connection...');
-    try {
-      const connectPromise = connectDB();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('MongoDB connection timeout')), 5000)
-      );
-      
-      await Promise.race([connectPromise, timeoutPromise]);
-      console.log('✅ MongoDB connected successfully');
-    } catch (dbError) {
-      console.warn(`⚠️  MongoDB connection warning: ${dbError.message}`);
-      console.warn('⚠️  Server will start but auth endpoints will fail');
-      console.warn('⚠️  Make sure MongoDB connection string is valid');
-    }
-
-    // Start server
-    console.log('\n📋 [STEP 3] Starting Express server...');
-    const PORT = process.env.PORT;
-
-    console.log("🚀 Using PORT:", PORT);
-    
-    const server = app.listen(PORT, () => {
-      console.log(`\n✅ Server is now listening on port ${PORT}`);
-      console.log(`✅ CORS is enabled and configured`);
-      console.log(`✅ All middleware initialized`);
-      console.log('\n' + '='.repeat(60));
-      console.log('🎉 Backend is ready to accept requests!');
-      console.log('='.repeat(60) + '\n');
-      
-      // Log available endpoints
-      console.log('📍 Available endpoints:');
-      console.log(`   - GET  /health`);
-      console.log(`   - GET  /test`);
-      console.log(`   - POST /api/auth/login`);
-      console.log(`   - POST /api/auth/register`);
-      console.log('\n');
-    });
-
-    // Graceful shutdown
-    process.on('SIGTERM', () => {
-      console.log('\n📛 SIGTERM signal received: closing HTTP server');
-      server.close(() => {
-        console.log('✅ HTTP server closed');
-        process.exit(0);
-      });
-    });
-
-  } catch (error) {
-    console.error('\n❌ CRITICAL SERVER STARTUP ERROR:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-      code: error.code
-    });
-    console.error('\n⚠️  Server will still attempt to start for health checks');
-    
-    // Attempt to at least start the server without DB
-    try {
-      const PORT = process.env.PORT || 5000;
-      app.listen(PORT, '0.0.0.0', () => {
-        console.log(`⚠️  Server started in degraded mode on port ${PORT}`);
-        console.log('⚠️  Auth endpoints may not work');
-      });
-    } catch (fallbackError) {
-      console.error('❌ FATAL: Could not start server:', fallbackError.message);
-      process.exit(1);
-    }
+  // Check environment variables
+  console.log('🔍 [STEP 1] Checking environment variables...');
+  const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET'];
+  const missingVars = requiredEnvVars.filter(v => !process.env[v]);
+  
+  if (missingVars.length > 0) {
+    console.error(`❌ CRITICAL: Missing required environment variables: ${missingVars.join(', ')}`);
+    console.error('⚠️  Setting dummy values for now - Login will fail without real values');
+  } else {
+    console.log('✅ All required environment variables present');
   }
+
+  // Start server IMMEDIATELY (don't wait for DB)
+  console.log('\n📋 [STEP 2] Starting Express server...');
+  const PORT = process.env.PORT || 5000;
+
+  console.log("🚀 Using PORT:", PORT);
+  
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n✅ Server is now listening on port ${PORT}`);
+    console.log(`✅ CORS is enabled and configured`);
+    console.log(`✅ All middleware initialized`);
+    console.log('\n' + '='.repeat(60));
+    console.log('🎉 Backend is ready to accept requests!');
+    console.log('='.repeat(60) + '\n');
+    
+    // Log available endpoints
+    console.log('📍 Available endpoints:');
+    console.log(`   - GET  /health`);
+    console.log(`   - GET  /test`);
+    console.log(`   - POST /api/auth/login`);
+    console.log(`   - POST /api/auth/register`);
+    console.log('\n');
+  });
+
+  // NON-BLOCKING: Connect to MongoDB in background
+  console.log('\n📡 [STEP 3] Connecting to MongoDB in background...');
+  connectDB()
+    .then(() => {
+      console.log('✅ MongoDB connected successfully');
+    })
+    .catch((err) => {
+      console.warn(`⚠️  MongoDB connection warning: ${err.message}`);
+      console.warn('⚠️  Server is running but auth endpoints will fail');
+      console.warn('⚠️  Make sure MongoDB connection string is valid');
+    });
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('\n📛 SIGTERM signal received: closing HTTP server');
+    server.close(() => {
+      console.log('✅ HTTP server closed');
+      process.exit(0);
+    });
+  });
 };
 
 // ============ PROCESS ERROR HANDLERS ============
@@ -217,3 +195,4 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start the server
 startServer();
+
