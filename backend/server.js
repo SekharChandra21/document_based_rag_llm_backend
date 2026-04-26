@@ -11,6 +11,9 @@ import authRoutes from "./routes/authRoutes.js";
 
 const app = express();
 
+// Trust proxy headers (required when behind Railway/Vercel/nginx)
+app.set('trust proxy', 1);
+
 // CORS configuration
 const corsOptions = {
   origin: function (origin, callback) {
