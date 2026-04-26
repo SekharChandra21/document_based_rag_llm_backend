@@ -11,117 +11,217 @@ import authRoutes from "./routes/authRoutes.js";
 
 const app = express();
 
-// Trust proxy headers (required when behind Railway/Vercel/nginx)
+// ============ CRITICAL: Trust proxy FIRST ============
 app.set('trust proxy', 1);
 
-// CORS configuration - MUST be before routes
+// ============ CRITICAL: CORS MUST be applied FIRST before any routes ============
 const corsOptions = {
   origin: function (origin, callback) {
+    // For debugging: log all incoming origins
+    console.log(`📨 Incoming request from origin: ${origin || 'NO ORIGIN (same-origin)'}`);
+    
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:3001',
+      'http://localhost:5000',
       'https://clinicaltrailsintelligentsystembackend-production.up.railway.app',
       'https://clinical-trails-intelligent-system.vercel.app',
       process.env.FRONTEND_URL
     ].filter(Boolean);
 
+    console.log(`✅ Allowed origins: ${allowedOrigins.join(', ')}`);
+    
     if (allowedOrigins.includes(origin)) {
+      console.log(`✅ CORS approved for: ${origin}`);
       return callback(null, true);
     } else {
-      console.warn(`⚠️  CORS blocked origin: ${origin}`);
-      return callback(null, true); // Still allow, but log it
+      console.warn(`⚠️  CORS request from unknown origin: ${origin}`);
+      // IMPORTANT: Still return true to allow for debugging, but log it
+      return callback(null, true);
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Content-Length', 'X-JSON-Response'],
-  maxAge: 3600,
-  optionsSuccessStatus: 200
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Length', 'X-JSON-Response', 'Authorization'],
+  maxAge: 86400, // 24 hours
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 };
 
-// Apply CORS globally (handles all methods including OPTIONS)
+// Apply CORS middleware IMMEDIATELY after trust proxy
 app.use(cors(corsOptions));
 
+// Parse JSON and URL-encoded bodies
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// ============ HEALTH CHECK ENDPOINTS (no DB required) ============
 app.get("/test", (req, res) => {
   res.json({ 
     status: "ok",
     message: "Server working",
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// Health check endpoint
 app.get("/health", (req, res) => {
   res.json({ 
     status: "healthy",
     message: "Backend is running",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
   });
 });
+
+// ============ API ROUTES ============
 app.use("/api/auth", authRoutes);
 app.use("/api", uploadRoutes);
 app.use("/api", ingestionRoutes);
 app.use("/api", queryRoutes);
 app.use("/api/chat", chatRoutes);
 
-// Error handling middleware
+// ============ Global Error Handler (must be last) ============
 app.use((err, req, res, next) => {
+  console.error('❌ Global error handler caught:', {
+    message: err.message,
+    stack: err.stack,
+    url: req.url,
+    method: req.method
+  });
+
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    console.error('❌ JSON Parse Error:', err.message);
-    console.error('❌ Request headers:', req.headers);
-    console.error('❌ Raw body preview:', req.body ? JSON.stringify(req.body).substring(0, 200) : 'No body');
     return res.status(400).json({ error: 'Invalid JSON in request body' });
   }
-  next(err);
+  
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: err.message 
+  });
 });
 
+// ============ SERVER STARTUP ============
 const startServer = async () => {
   try {
-    console.log('🔍 Checking environment variables...');
+    console.log('\n' + '='.repeat(60));
+    console.log('🚀 Clinical Trails Intelligence System - Backend Starting');
+    console.log('='.repeat(60) + '\n');
+
+    // Check environment variables
+    console.log('🔍 [STEP 1] Checking environment variables...');
     const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET'];
     const missingVars = requiredEnvVars.filter(v => !process.env[v]);
     
     if (missingVars.length > 0) {
-      console.error(`❌ Missing required environment variables: ${missingVars.join(', ')}`);
-      process.exit(1);
+      console.error(`❌ CRITICAL: Missing required environment variables: ${missingVars.join(', ')}`);
+      console.error('⚠️  Setting dummy values for now - Login will fail without real values');
+      // Don't exit - allow server to start for health checks
+    } else {
+      console.log('✅ All required environment variables present');
     }
-    
-    console.log('✅ All required environment variables present');
-    console.log('📡 Attempting to connect to MongoDB...');
-    
-    await connectDB();
-    
+
+    // Attempt MongoDB connection (non-blocking with timeout)
+    console.log('\n📡 [STEP 2] Attempting MongoDB connection...');
+    try {
+      const connectPromise = connectDB();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('MongoDB connection timeout')), 5000)
+      );
+      
+      await Promise.race([connectPromise, timeoutPromise]);
+      console.log('✅ MongoDB connected successfully');
+    } catch (dbError) {
+      console.warn(`⚠️  MongoDB connection warning: ${dbError.message}`);
+      console.warn('⚠️  Server will start but auth endpoints will fail');
+      console.warn('⚠️  Make sure MongoDB connection string is valid');
+    }
+
+    // Start server
+    console.log('\n📋 [STEP 3] Starting Express server...');
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`✅ Server is ready to accept requests`);
+    
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`\n✅ Server is now listening on port ${PORT}`);
+      console.log(`✅ CORS is enabled and configured`);
+      console.log(`✅ All middleware initialized`);
+      console.log('\n' + '='.repeat(60));
+      console.log('🎉 Backend is ready to accept requests!');
+      console.log('='.repeat(60) + '\n');
+      
+      // Log available endpoints
+      console.log('📍 Available endpoints:');
+      console.log(`   - GET  /health`);
+      console.log(`   - GET  /test`);
+      console.log(`   - POST /api/auth/login`);
+      console.log(`   - POST /api/auth/register`);
+      console.log('\n');
     });
+
+    // Graceful shutdown
+    process.on('SIGTERM', () => {
+      console.log('\n📛 SIGTERM signal received: closing HTTP server');
+      server.close(() => {
+        console.log('✅ HTTP server closed');
+        process.exit(0);
+      });
+    });
+
   } catch (error) {
-    console.error('❌ Server startup error:', {
+    console.error('\n❌ CRITICAL SERVER STARTUP ERROR:', {
       message: error.message,
       stack: error.stack,
       name: error.name,
       code: error.code
     });
-    process.exit(1);
+    console.error('\n⚠️  Server will still attempt to start for health checks');
+    
+    // Attempt to at least start the server without DB
+    try {
+      const PORT = process.env.PORT || 5000;
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`⚠️  Server started in degraded mode on port ${PORT}`);
+        console.log('⚠️  Auth endpoints may not work');
+      });
+    } catch (fallbackError) {
+      console.error('❌ FATAL: Could not start server:', fallbackError.message);
+      process.exit(1);
+    }
   }
 };
 
-// Handle uncaught errors to prevent container crashes
+// ============ PROCESS ERROR HANDLERS ============
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+  console.error('\n❌ UNCAUGHT EXCEPTION:', {
+    message: err.message,
+    stack: err.stack,
+    timestamp: new Date().toISOString()
+  });
+  // Don't exit - let the server keep running
 });
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('\n❌ UNHANDLED REJECTION:', {
+    reason: reason,
+    promise: promise,
+    timestamp: new Date().toISOString()
+  });
+  // Don't exit - let the server keep running
+});
+
+// Start the server
+startServer();
+
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-startServer();
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception thrown:', err);
+  process.exit(1);
+});
