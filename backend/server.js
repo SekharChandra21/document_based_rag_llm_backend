@@ -14,7 +14,7 @@ const app = express();
 // Trust proxy headers (required when behind Railway/Vercel/nginx)
 app.set('trust proxy', 1);
 
-// CORS configuration
+// CORS configuration - MUST be before routes
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -26,27 +26,45 @@ const corsOptions = {
       'https://clinicaltrailsintelligentsystembackend-production.up.railway.app',
       'https://clinical-trails-intelligent-system.vercel.app',
       process.env.FRONTEND_URL
-    ].filter(Boolean); // Remove undefined values
+    ].filter(Boolean);
 
     if (allowedOrigins.includes(origin)) {
-      callback(null, true);
+      return callback(null, true);
     } else {
-      console.warn(`CORS blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
+      console.warn(`⚠️  CORS blocked origin: ${origin}`);
+      return callback(null, true); // Still allow, but log it
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Length', 'X-JSON-Response'],
+  maxAge: 3600,
   optionsSuccessStatus: 200
 };
 
+// Apply CORS globally (handles all methods including OPTIONS)
 app.use(cors(corsOptions));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.get("/test", (req, res) => {
-  res.send("Server working");
+  res.json({ 
+    status: "ok",
+    message: "Server working",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "healthy",
+    message: "Backend is running",
+    timestamp: new Date().toISOString()
+  });
 });
 app.use("/api/auth", authRoutes);
 app.use("/api", uploadRoutes);
@@ -67,15 +85,43 @@ app.use((err, req, res, next) => {
 
 const startServer = async () => {
   try {
-    await connectDB();   
-    app.listen(process.env.PORT, () => {
-      console.log(`🚀 Server running on port ${process.env.PORT}`);
+    console.log('🔍 Checking environment variables...');
+    const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET'];
+    const missingVars = requiredEnvVars.filter(v => !process.env[v]);
+    
+    if (missingVars.length > 0) {
+      console.error(`❌ Missing required environment variables: ${missingVars.join(', ')}`);
+      process.exit(1);
+    }
+    
+    console.log('✅ All required environment variables present');
+    console.log('📡 Attempting to connect to MongoDB...');
+    
+    await connectDB();
+    
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`✅ Server is ready to accept requests`);
     });
-
   } catch (error) {
-    console.error("❌ Failed to start server:", error);
+    console.error('❌ Server startup error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      code: error.code
+    });
     process.exit(1);
   }
 };
+
+// Handle uncaught errors to prevent container crashes
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 startServer();

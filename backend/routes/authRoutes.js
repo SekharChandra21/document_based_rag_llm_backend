@@ -14,6 +14,7 @@ const authLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false
 });
 
 const registerLimiter = rateLimit({
@@ -24,6 +25,7 @@ const registerLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false
 });
 
 // Validation rules

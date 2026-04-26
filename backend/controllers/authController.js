@@ -16,6 +16,12 @@ export const register = async (req, res) => {
 
     const { name, email, password } = req.body;
 
+    // Check database connection
+    if (!User || !User.findOne) {
+      console.error("❌ Database connection issue: User model not available");
+      return res.status(503).json({ error: "Database service unavailable" });
+    }
+
     // Check if user already exists
     const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
     if (existingUser) {
@@ -34,7 +40,7 @@ export const register = async (req, res) => {
 
     // Check JWT secret
     if (!process.env.JWT_SECRET) {
-      console.error("JWT secret is not configured.");
+      console.error("❌ JWT secret is not configured in production");
       return res.status(500).json({ error: "Authentication configuration error" });
     }
 
@@ -58,7 +64,12 @@ export const register = async (req, res) => {
       message: "Registration successful"
     });
   } catch (err) {
-    console.error("Auth register error:", err);
+    console.error("❌ Auth register error:", {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+      code: err.code
+    });
 
     // Handle validation errors
     if (err.name === 'ValidationError') {
@@ -69,6 +80,11 @@ export const register = async (req, res) => {
     // Handle duplicate key error
     if (err.code === 11000) {
       return res.status(409).json({ error: "Email already in use" });
+    }
+
+    // Check for MongoDB connection errors
+    if (err.name === 'MongoNetworkError' || err.name === 'MongoServerError') {
+      return res.status(503).json({ error: "Database service unavailable" });
     }
 
     res.status(500).json({ error: "Registration failed" });
@@ -88,6 +104,12 @@ export const login = async (req, res) => {
 
     const { email, password } = req.body;
 
+    // Check database connection
+    if (!User || !User.findOne) {
+      console.error("❌ Database connection issue: User model not available");
+      return res.status(503).json({ error: "Database service unavailable" });
+    }
+
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password" });
@@ -99,7 +121,7 @@ export const login = async (req, res) => {
     }
 
     if (!process.env.JWT_SECRET) {
-      console.error("JWT secret is not configured.");
+      console.error("❌ JWT secret is not configured in production");
       return res.status(500).json({ error: "Authentication configuration error" });
     }
 
@@ -119,7 +141,18 @@ export const login = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Auth login error:", err);
+    console.error("❌ Auth login error:", {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+      code: err.code
+    });
+    
+    // Check for specific MongoDB connection errors
+    if (err.name === 'MongoNetworkError' || err.name === 'MongoServerError') {
+      return res.status(503).json({ error: "Database service unavailable" });
+    }
+    
     res.status(500).json({ error: "Login failed" });
   }
 };
